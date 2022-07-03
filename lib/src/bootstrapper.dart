@@ -43,13 +43,13 @@ Future<void> bootstrap(
   }
 
   var script = Platform.script.toFilePath();
-  print(script);
+  var isCompiled = !script.endsWith('.dart');
 
   var process = await Process.start(
-    'dart',
-    [script, ...args],
+    Platform.executable,
+    isCompiled ? args : [script, ...args],
     mode: ProcessStartMode.detachedWithStdio,
-    environment: {argUnlock: '$pid'},
+    environment: {...Platform.environment, argUnlock: '$pid'},
   );
 
   print('child process pid: ${process.pid}');
