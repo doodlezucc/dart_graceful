@@ -11,11 +11,25 @@ bool isRunning = true;
 typedef Print = void Function(Object obj);
 typedef CleanExit = FutureOr<int> Function(Print print);
 
+const allSignals = [
+  ProcessSignal.sigint,
+  ProcessSignal.sighup,
+  ProcessSignal.sigterm,
+];
+
+bool isSignalWatchable(ProcessSignal sig) {
+  if (Platform.isWindows) {
+    return sig == ProcessSignal.sigint || sig == ProcessSignal.sighup;
+  }
+  return true;
+}
+
 Future<void> bootstrap(
   List<String> args,
   CleanExit cleanExit, {
   String out = 'logs/out.log',
   String err = 'logs/err.log',
+  Iterable<ProcessSignal> signals = allSignals,
 }) async {
   if (Platform.environment.containsKey(argUnlock)) {
     _watchForParentExit(cleanExit, out);
@@ -57,7 +71,12 @@ Future<void> bootstrap(
     errSeq.add(() => errFile.writeFrom(data));
   });
 
-  await Future.any([completer.future, ProcessSignal.sigint.watch().first]);
+  var watchable = signals.where((sig) => isSignalWatchable(sig));
+
+  await Future.any([
+    completer.future,
+    ...watchable.map((sig) => sig.watch().first),
+  ]);
 
   outSeq.add(() => outFile.close());
   errSeq.add(() => errFile.close());
