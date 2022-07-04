@@ -1,12 +1,13 @@
 import 'package:graceful/graceful.dart';
 
-void main(List<String> args) async {
-  var dir = 'example/logs';
-  await bootstrap(
+const exampleLogs = 'example/logs';
+
+void main(List<String> args) {
+  return bootstrap(
     run,
     args: args,
-    outLog: '$dir/out.log',
-    errLog: '$dir/err.log',
+    outLog: '$exampleLogs/out.log',
+    errLog: '$exampleLogs/err.log',
     onExit: onExit,
   );
 }

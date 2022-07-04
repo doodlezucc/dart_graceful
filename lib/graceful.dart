@@ -1,18 +1,18 @@
 /// Support for log files and process termination handling.
 ///
-/// Enable graceful exiting by calling `await bootstrap(...)` at the start
-/// of `main` and by defining a custom shutdown function.
+/// Enable graceful exiting by returning `bootstrap(...)` directly from your
+/// `main` and by defining a custom shutdown function.
 ///
 /// ```
 /// import 'package:graceful/graceful.dart';
 ///
-/// void main(List<String> args) async {
-///   await bootstrap(args, cleanExit); // Register bootstrapper
+/// void main(List<String> args) => bootstrap(run, args, onExit: onExit);
 ///
+/// void run(List<String> args) {
 ///   // Your code...
 /// }
 ///
-/// Future<int> cleanExit(Print print) async {
+/// Future<int> onExit() async {
 ///   // Perform cleanup...
 ///
 ///   print('Exited gracefully');
@@ -21,4 +21,4 @@
 /// ```
 library graceful;
 
-export 'src/bootstrapper.dart' show bootstrap, Print, allSignals;
+export 'src/bootstrapper.dart' show bootstrap, allSignals;

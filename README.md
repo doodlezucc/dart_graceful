@@ -7,18 +7,20 @@ If you're on Windows, make sure you have [Dart SDK v2.17.0 or higher](https://gi
 
 ## Usage
 
-Enable graceful exiting by calling `await bootstrap(...)` at the start of `main` and by defining a custom shutdown function.
+Enable graceful exiting by returning `bootstrap(...)` directly from your `main` and by defining a custom shutdown function.
 
 ```dart
 import 'package:graceful/graceful.dart';
 
-void main(List<String> args) async {
-  await bootstrap(args, cleanExit); // Register bootstrapper
+void main(List<String> args) {
+  return bootstrap(run, args, onExit: onExit);
+}
 
+void run(List<String> args) {
   // Your code...
 }
 
-Future<int> cleanExit(Print print) async {
+Future<int> onExit() async {
   // Perform cleanup...
 
   print('Exited gracefully');
@@ -26,14 +28,11 @@ Future<int> cleanExit(Print print) async {
 }
 ```
 
-Use `print` as you would anywhere else in your code.
-At shutdown, regular `stdout` messages aren't automatically piped into log files. Because of this, you're provided with a special print function.
-
 ## How it works
 
 When running your Dart program, two processes are started behind the scenes - parent and child.
 
-As soon as an instance runs into `await bootstrap(...)`, it either continues or blocks execution. The abscence of a specific environment variable causes the initial process to act as parent/wrapper. Instead of running your code, it starts another instance of itself that should take the role of child/worker process.
+As soon as an instance runs into `bootstrap(...)`, it either continues or blocks execution. The abscence of a specific environment variable causes the initial process to act as parent/wrapper. Instead of running your code, it starts another instance of itself that should take the role of child/worker process.
 
 This worker process keeps running even if the parent is terminated. As per the [API Docs](https://api.dart.dev/stable/dart-io/Process/start.html):
 
