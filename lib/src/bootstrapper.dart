@@ -181,7 +181,15 @@ Future<bool> _isProcessRunning(int pid) async {
       runInShell: true,
     );
     return result.exitCode == 0;
+  } else if (Platform.isLinux) {
+    var result = await Process.run(
+      'ps',
+      ['$pid'],
+      runInShell: true,
+    );
+    return result.exitCode == 0;
   }
+
   throw UnsupportedError(
-      'Bootstrapper not yet supported for ${Platform.operatingSystem}');
+      'Not able to find parent process on ${Platform.operatingSystem}');
 }
