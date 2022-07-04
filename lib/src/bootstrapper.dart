@@ -1,15 +1,13 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:path/path.dart';
-
-import 'future_queue.dart';
+import 'file_stdio.dart';
 
 const argUnlock = 'unlock-boot';
 bool isRunning = true;
 
 typedef Print = void Function(Object obj);
-typedef CleanExit = FutureOr<int> Function(Print print);
+typedef ExitFunc = FutureOr<int> Function();
 
 const allSignals = [
   ProcessSignal.sigint,
@@ -25,21 +23,35 @@ bool isSignalWatchable(ProcessSignal sig) {
 }
 
 Future<void> bootstrap(
-  List<String> args,
-  CleanExit cleanExit, {
-  String out = 'logs/out.log',
-  String err = 'logs/err.log',
+  FutureOr Function(List<String> args) body, {
+  List<String> args = const [],
+  String outLog = 'logs/out.log',
+  String errLog = 'logs/err.log',
+  ExitFunc? onExit,
   Iterable<ProcessSignal> signals = allSignals,
 }) async {
   if (Platform.environment.containsKey(argUnlock)) {
-    _watchForParentExit(cleanExit, out);
-    return;
-  }
+    // Override stdout and stderr with custom
+    // file writer implementations
+    IOOverrides.global = FileIOOverrides(File(outLog), File(errLog));
 
-  Future<RandomAccessFile> open(String path) async {
-    var dir = dirname(path);
-    await Directory(dir).create(recursive: true);
-    return await File(path).open(mode: FileMode.writeOnly);
+    // For some reason, the child quits abruptly
+    // if [stdout.done] is not listened to
+    stdout.done.then((_) {});
+
+    // Run program with custom print function
+    return runZoned(
+      () {
+        if (onExit != null) {
+          _watchForParentExit(onExit, outLog);
+        }
+
+        return body(args);
+      },
+      zoneSpecification: ZoneSpecification(
+        print: (_, __, ___, line) => stdout.writeln(line),
+      ),
+    );
   }
 
   var script = Platform.script.toFilePath();
@@ -54,43 +66,24 @@ Future<void> bootstrap(
 
   print('child process pid: ${process.pid}');
 
-  var completer = Completer();
+  var childExit = Completer();
 
-  var outFile = await open(out);
-  var errFile = await open(err);
-  var outSeq = FutureQueue();
-  var errSeq = FutureQueue();
-
-  process.stdout.listen((data) {
-    stdout.add(data);
-    outSeq.add(() => outFile.writeFrom(data));
-  }, onDone: () => completer.complete());
-
-  process.stderr.listen((data) {
-    stderr.add(data);
-    errSeq.add(() => errFile.writeFrom(data));
-  });
+  process.stdout.listen(stdout.add, onDone: () => childExit.complete());
+  process.stderr.listen(stderr.add);
 
   var watchable = signals.where((sig) => isSignalWatchable(sig));
 
   await Future.any([
-    completer.future,
+    childExit.future,
     ...watchable.map((sig) => sig.watch().first),
   ]);
 
-  outSeq.add(() => outFile.close());
-  errSeq.add(() => errFile.close());
-  await Future.wait([outSeq.whenDrained, errSeq.whenDrained]);
+  print('Parent exits');
 
   exit(0);
 }
 
-void _specialPrint(Object obj, String out) {
-  print(obj);
-  File(out).writeAsStringSync('$obj\n', mode: FileMode.append);
-}
-
-void _watchForParentExit(CleanExit cleanup, String out) async {
+void _watchForParentExit(ExitFunc cleanup, String out) async {
   var parent = int.parse(Platform.environment[argUnlock]!);
   print('parent pid: $parent');
   while (isRunning) {
@@ -99,7 +92,7 @@ void _watchForParentExit(CleanExit cleanup, String out) async {
     var isAlive = await _isProcessRunning(parent);
 
     if (!isAlive) {
-      var exitCode = await cleanup((obj) => _specialPrint(obj, out));
+      var exitCode = await cleanup();
       exit(exitCode);
     }
   }

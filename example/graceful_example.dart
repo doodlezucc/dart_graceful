@@ -3,12 +3,15 @@ import 'package:graceful/graceful.dart';
 void main(List<String> args) async {
   var dir = 'example/logs';
   await bootstrap(
-    args,
-    cleanExit,
-    out: '$dir/out.log',
-    err: '$dir/err.log',
+    run,
+    args: args,
+    outLog: '$dir/out.log',
+    errLog: '$dir/err.log',
+    onExit: onExit,
   );
+}
 
+void run(List<String> args) async {
   print('Program start');
   print('Waiting for 5 seconds...');
   await Future.delayed(Duration(seconds: 5));
@@ -21,7 +24,7 @@ void main(List<String> args) async {
   }
 }
 
-Future<int> cleanExit(Print print) async {
+Future<int> onExit() async {
   print('Cleaning up...');
   await Future.delayed(Duration(seconds: 1));
   print('Exiting');
