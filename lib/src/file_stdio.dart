@@ -1,85 +1,31 @@
 import 'dart:convert';
 import 'dart:io';
 
-Future<void> debugPrint(Object line) {
-  return Future.sync(
-      () => File('debug').writeAsStringSync('$line\n', mode: FileMode.append));
-}
+typedef Logger = String Function(String line);
 
-class MySink implements IOSink {
-  @override
-  Encoding encoding;
+String logPassthrough(String line) => line;
 
-  final IOSink next;
-
-  MySink(this.next) : encoding = next.encoding;
-
-  @override
-  void add(List<int> data) {
-    debugPrint('ADD $data');
-    next.add(data);
-  }
-
-  @override
-  void addError(Object error, [StackTrace? stackTrace]) {
-    debugPrint('ADD ERROR $error');
-    next.addError(error, stackTrace);
-  }
-
-  @override
-  Future addStream(Stream<List<int>> stream) {
-    debugPrint('ADD STREAM');
-    return next.addStream(stream);
-  }
-
-  @override
-  Future close() {
-    debugPrint('CLOSE');
-    return next.close();
-  }
-
-  @override
-  Future get done => next.done;
-
-  @override
-  Future flush() {
-    debugPrint('FLUSH');
-    return next.flush();
-  }
-
-  @override
-  void write(Object? object) {
-    debugPrint('WRITE $object');
-    next.write(object);
-  }
-
-  @override
-  void writeAll(Iterable objects, [String separator = ""]) {
-    debugPrint('WRITE ALL');
-    next.writeAll(objects, separator);
-  }
-
-  @override
-  void writeCharCode(int charCode) {
-    debugPrint('WRITE CHAR CHODE $charCode');
-    next.writeCharCode(charCode);
-  }
-
-  @override
-  void writeln([Object? object = ""]) {
-    debugPrint('WRITE LN $object');
-    next.writeln(object);
-  }
+String logTimestamp(String line) {
+  var n = DateTime.now();
+  var time = n.toIso8601String().substring(0, 19);
+  return '$time $line';
 }
 
 class FileStdout implements Stdout {
   final IOSink output;
   final Stdout parent;
+  final Logger fileLogger;
+  final Logger stdLogger;
 
   @override
   Encoding encoding;
 
-  FileStdout(this.output, this.parent) : encoding = parent.encoding;
+  FileStdout(
+    this.output,
+    this.parent, {
+    required this.fileLogger,
+    required this.stdLogger,
+  }) : encoding = parent.encoding;
 
   @override
   void add(List<int> data) {
@@ -141,9 +87,17 @@ class FileStdout implements Stdout {
 
   @override
   void writeln([Object? object = ""]) {
-    parent.writeln(object);
-    output.writeln(object);
+    var out = _modifyLines(object, stdLogger);
+    parent.writeln(out);
+
+    if (fileLogger != stdLogger) {
+      out = _modifyLines(object, fileLogger);
+    }
+    output.writeln(out);
   }
+
+  String _modifyLines(Object? object, Logger logger) =>
+      '$object'.split('\n').map((line) => logger(line)).join('\n');
 }
 
 class FileIOOverrides extends IOOverrides {
@@ -152,11 +106,26 @@ class FileIOOverrides extends IOOverrides {
   late final FileStdout _stdout;
   late final FileStdout _stderr;
 
-  FileIOOverrides(this.outFile, this.errFile) {
+  FileIOOverrides(
+    this.outFile,
+    this.errFile, {
+    Logger stdLogger = logPassthrough,
+    Logger fileLogger = logTimestamp,
+  }) {
     outFile.createSync(recursive: true);
     errFile.createSync(recursive: true);
-    _stdout = FileStdout(outFile.openWrite(), super.stdout);
-    _stderr = FileStdout(errFile.openWrite(), super.stderr);
+    _stdout = FileStdout(
+      outFile.openWrite(),
+      super.stdout,
+      fileLogger: fileLogger,
+      stdLogger: stdLogger,
+    );
+    _stderr = FileStdout(
+      errFile.openWrite(),
+      super.stderr,
+      fileLogger: fileLogger,
+      stdLogger: stdLogger,
+    );
   }
 
   @override

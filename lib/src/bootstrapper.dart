@@ -55,6 +55,8 @@ void bootstrap(
   bool enableLogFiles = true,
   String outLog = 'logs/out.log',
   String errLog = 'logs/err.log',
+  Logger loggerStd = logPassthrough,
+  Logger loggerFile = logTimestamp,
   bool? enableGracefulExit,
   ExitFunc? onExit,
   Iterable<ProcessSignal> signals = allSignals,
@@ -68,11 +70,13 @@ void bootstrap(
 
   if (!enableGracefulExit || Platform.environment.containsKey(argUnlock)) {
     bootstrapper.runAsWorker(
+      enableLogFiles: enableLogFiles,
       outLog: outLog,
       errLog: errLog,
-      enableLogFiles: enableLogFiles,
-      onExit: onExit,
+      loggerStd: loggerStd,
+      loggerFile: loggerFile,
       enableGracefulExit: enableGracefulExit,
+      onExit: onExit,
     );
   } else {
     bootstrapper.runAsWrapper(signals: signals);
@@ -89,15 +93,22 @@ class Bootstrapper {
   });
 
   void runAsWorker({
-    required ExitFunc? onExit,
     required bool enableLogFiles,
     required String outLog,
     required String errLog,
+    required Logger loggerStd,
+    required Logger loggerFile,
     required bool enableGracefulExit,
+    required ExitFunc? onExit,
   }) {
     // Override stdout and stderr with custom
     // file writer implementations
-    IOOverrides.global = FileIOOverrides(File(outLog), File(errLog));
+    IOOverrides.global = FileIOOverrides(
+      File(outLog),
+      File(errLog),
+      stdLogger: loggerStd,
+      fileLogger: loggerFile,
+    );
 
     // For some reason, the child quits abruptly
     // if [stdout.done] is not listened to
