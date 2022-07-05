@@ -21,4 +21,13 @@
 /// ```
 library graceful;
 
-export 'src/bootstrapper.dart' show bootstrap, allSignals;
+export 'src/bootstrapper.dart'
+    show allSignals, bootstrap, isDebugMode, Bootstrapper;
+export 'src/file_stdio.dart'
+    show
+        BroadcastStdin,
+        FileIOOverrides,
+        FileStdout,
+        logPassthrough,
+        logTimestamp,
+        Logger;

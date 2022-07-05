@@ -4,7 +4,8 @@ import 'dart:io';
 import 'file_stdio.dart';
 
 const argUnlock = 'unlock-boot';
-bool isRunning = true;
+const exitCommand = 'EXIT_GRACEFUL';
+final _exitCommandBytes = exitCommand.codeUnits + [10];
 
 typedef BodyFunc = FutureOr Function(List<String> args);
 typedef ExitFunc = FutureOr<int> Function();
@@ -84,6 +85,9 @@ void bootstrap(
 }
 
 class Bootstrapper {
+  static bool _isRunning = true;
+  static bool get isRunning => _isRunning;
+
   final BodyFunc body;
   final List<String> args;
 
@@ -115,8 +119,14 @@ class Bootstrapper {
     stdout.done.then((_) {});
 
     void workerProgram() {
+      void customExit() async {
+        _isRunning = false;
+        var exitCode = await onExit!();
+        exit(exitCode);
+      }
+
       if (enableGracefulExit && onExit != null) {
-        _watchForParentExit(onExit, outLog);
+        _watchForParentExit(customExit, outLog);
       }
 
       body(args);
@@ -149,12 +159,13 @@ class Bootstrapper {
       environment: {...Platform.environment, argUnlock: '$pid'},
     );
 
-    print('child process pid: ${process.pid}');
+    print('child pid: ${process.pid}');
 
     var childExit = Completer();
 
     process.stdout.listen(stdout.add, onDone: () => childExit.complete());
     process.stderr.listen(stderr.add);
+    stdin.listen(process.stdin.add);
 
     var watchable = signals.where((sig) => isSignalWatchable(sig));
 
@@ -163,25 +174,49 @@ class Bootstrapper {
       ...watchable.map((sig) => sig.watch().first),
     ]);
 
-    print('Parent exits');
+    print('Parent exits...');
+
+    _sendExitToChild(process);
+    await childExit.future;
 
     exit(0);
   }
 }
 
-void _watchForParentExit(ExitFunc cleanup, String out) async {
+bool _listsEqual(List a, List b) {
+  if (a.length != b.length) return false;
+
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+
+  return true;
+}
+
+void _watchForParentExit(void Function() cleanup, String out) async {
   var parent = int.parse(Platform.environment[argUnlock]!);
   print('parent pid: $parent');
-  while (isRunning) {
-    await Future.delayed(Duration(seconds: 3));
 
+  stdin.listen((data) {
+    if (_listsEqual(data, _exitCommandBytes)) cleanup();
+  });
+
+  await Future.delayed(Duration(seconds: 3));
+
+  while (Bootstrapper.isRunning) {
     var isAlive = await _isProcessRunning(parent);
 
     if (!isAlive) {
-      var exitCode = await cleanup();
-      exit(exitCode);
+      cleanup();
+      break;
     }
+
+    await Future.delayed(Duration(seconds: 3));
   }
+}
+
+void _sendExitToChild(Process process) {
+  process.stdin.add(_exitCommandBytes);
 }
 
 Future<bool> _isProcessRunning(int pid) async {
