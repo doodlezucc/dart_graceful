@@ -256,7 +256,7 @@ Future<bool> isProcessRunning(int pid) async {
       runInShell: true,
     );
     return result.exitCode == 0;
-  } else if (Platform.isLinux) {
+  } else if (Platform.isLinux || Platform.isMacOS) {
     var result = await Process.run(
       'ps',
       ['$pid'],

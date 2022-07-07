@@ -13,22 +13,15 @@ void main() {
     expect(listsEqual(['test'], ['rest']), false);
   });
 
-  group('isProcessRunning', () {
-    test('returns false', () async {
-      var isRunning = await isProcessRunning(-1);
-      expect(isRunning, false);
-    });
+  test('isProcessRunning (starting/killing a new process)', () async {
+    var process = await Process.start(
+      Platform.executable,
+      ['example/graceful_example.dart'],
+    );
+    var pid = process.pid;
 
-    test('starting/killing a new process', () async {
-      var process = await Process.start(
-        Platform.executable,
-        ['example/graceful_example.dart'],
-      );
-      var pid = process.pid;
-
-      expect(await isProcessRunning(pid), true);
-      expect(process.kill(), true);
-      expect(await isProcessRunning(pid), false);
-    });
+    expect(await isProcessRunning(pid), true);
+    expect(process.kill(), true);
+    expect(await isProcessRunning(pid), false);
   });
 }
