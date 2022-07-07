@@ -1,6 +1,6 @@
 name: graceful
-description: Handle exit signals gracefully and pipe stdio to log files.
-version: 1.0.0
+description: Handle exit signals gracefully and pipe console output to log files.
+version: 1.1.0
 repository: https://github.com/doodlezucc/dart_graceful
 
 environment:

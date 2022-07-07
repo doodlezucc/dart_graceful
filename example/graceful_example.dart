@@ -7,9 +7,9 @@ void main(List<String> args) {
   return bootstrap(
     run,
     args: args,
-    outLog: exampleLogFile,
-    errLog: exampleLogFile,
     onExit: onExit,
+    fileOut: exampleLogFile,
+    fileErr: exampleLogFile,
   );
 }
 
@@ -31,5 +31,5 @@ Future<int> onExit() async {
   await Future.delayed(Duration(seconds: 1));
   print('Program exit');
 
-  return 0;
+  return 0; // Exit code
 }

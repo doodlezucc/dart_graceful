@@ -13,7 +13,7 @@ Enable graceful exiting by returning `bootstrap(...)` directly from your `main` 
 import 'package:graceful/graceful.dart';
 
 void main(List<String> args) {
-  return bootstrap(run, args, onExit: onExit);
+  return bootstrap(run, args: args, onExit: onExit);
 }
 
 void run(List<String> args) {

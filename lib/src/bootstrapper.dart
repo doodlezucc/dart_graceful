@@ -31,21 +31,25 @@ bool isSignalWatchable(ProcessSignal sig) {
 bool get isDebugMode =>
     Platform.executableArguments.contains('--enable-asserts');
 
-/// Runs this program in a detached child process.
+const bool? ifNotDebugging = null;
+
+/// Allows running this program with a custom exiting function
+/// and optional file logging.
 ///
-/// Graceful exiting is **disabled in debug mode**, as breakpoints are not
-/// properly triggered.
-/// Pass `enableGracefulExit: true` to enable it anyway.
+/// This bootstrapper normally starts a new child process to make sure your
+/// program doesn't exit unexpectedly.
+/// Child process spawning is **disabled in debug mode**, as breakpoints are not
+/// properly triggered. Pass `enableChildProcess: true` to enable it anyway.
 ///
-/// Log files are also **disabled in debug mode** by default and can be enabled
-/// with `enableLogFiles: true`.
+/// Log files are **disabled in debug mode** by default and can be enabled with
+/// `enableLogFiles: true`.
 ///
 /// It's recommended to return `bootstrap()` directly from your `main` function.
 ///
 /// ```
 /// // Dart entry
 /// void main(List<String> args) {
-///   return bootstrap(run, args, onExit: onExit);
+///   return bootstrap(run, args: args, onExit: onExit);
 /// }
 ///
 /// void run(List<String> args) {
@@ -60,35 +64,36 @@ bool get isDebugMode =>
 void bootstrap(
   BodyFunc body, {
   List<String> args = const [],
-  bool? enableLogFiles,
-  String outLog = 'logs/out.log',
-  String errLog = 'logs/err.log',
-  Logger loggerStd = logPassthrough,
-  Logger loggerFile = logTimestamp,
-  bool? enableGracefulExit,
   ExitFunc? onExit,
   Iterable<ProcessSignal> signals = allSignals,
+  bool? enableChildProcess = ifNotDebugging,
+  bool? enableLogFiles = ifNotDebugging,
+  String fileOut = 'logs/out.log',
+  String fileErr = 'logs/err.log',
+  Logger formatterStd = logPassthrough,
+  Logger formatterFile = logTimestamp,
 }) async {
   var bootstrapper = Bootstrapper(
     body: body,
     args: args,
+    signals: signals,
   );
 
+  enableChildProcess ??= !isDebugMode;
   enableLogFiles ??= !isDebugMode;
-  enableGracefulExit ??= !isDebugMode;
 
-  if (!enableGracefulExit || Platform.environment.containsKey(argUnlock)) {
+  if (!enableChildProcess || Platform.environment.containsKey(argUnlock)) {
     bootstrapper.runAsWorker(
       enableLogFiles: enableLogFiles,
-      outLog: outLog,
-      errLog: errLog,
-      loggerStd: loggerStd,
-      loggerFile: loggerFile,
-      enableGracefulExit: enableGracefulExit,
+      outLog: fileOut,
+      errLog: fileErr,
+      loggerStd: formatterStd,
+      loggerFile: formatterFile,
+      isChildProcess: enableChildProcess,
       onExit: onExit,
     );
   } else {
-    bootstrapper.runAsWrapper(signals: signals);
+    bootstrapper.runAsWrapper();
   }
 }
 
@@ -99,12 +104,14 @@ class Bootstrapper {
 
   final BodyFunc body;
   final List<String> args;
+  final Iterable<ProcessSignal> signals;
 
   static final _exitController = StreamController(sync: true);
 
   Bootstrapper({
     required this.body,
     required this.args,
+    required this.signals,
   });
 
   void runAsWorker({
@@ -113,7 +120,7 @@ class Bootstrapper {
     required String errLog,
     required Logger loggerStd,
     required Logger loggerFile,
-    required bool enableGracefulExit,
+    required bool isChildProcess,
     required ExitFunc? onExit,
   }) {
     if (enableLogFiles) {
@@ -137,13 +144,16 @@ class Bootstrapper {
 
         _isExiting = true;
         _isRunning = false;
-        var exitCode = await onExit!();
+        var exitCode = onExit != null ? await onExit() : 0;
         exit(exitCode);
       }
 
-      Bootstrapper._exitController.stream.first.then((_) => customExit());
+      Future.any([
+        Bootstrapper._exitController.stream.first,
+        ..._awaitSignals(signals)
+      ]).then((_) => customExit());
 
-      if (enableGracefulExit && onExit != null) {
+      if (isChildProcess && onExit != null) {
         _watchForParentExit(customExit);
       }
 
@@ -160,7 +170,7 @@ class Bootstrapper {
       print: (_, __, ___, line) => stdout.writeln(line),
     );
 
-    if (!enableGracefulExit) {
+    if (!isChildProcess) {
       return runZoned(workerProgram, zoneSpecification: printToStdout);
     }
 
@@ -176,7 +186,7 @@ class Bootstrapper {
     _exitController.add(null);
   }
 
-  void runAsWrapper({required Iterable<ProcessSignal> signals}) async {
+  void runAsWrapper() async {
     var script = Platform.script.toFilePath();
     var isCompiled = !script.endsWith('.dart');
 
@@ -193,18 +203,18 @@ class Bootstrapper {
     process.stderr.listen(stderr.add);
     stdin.listen(process.stdin.add);
 
-    var watchable = signals.where((sig) => isSignalWatchable(sig));
-
-    await Future.any([
-      childExit.future,
-      ...watchable.map((sig) => sig.watch().first),
-    ]);
+    await Future.any([childExit.future, ..._awaitSignals(signals)]);
 
     _sendExitToChild(process);
     await childExit.future;
 
     exit(0);
   }
+}
+
+Iterable<Future> _awaitSignals(Iterable<ProcessSignal> signals) {
+  var watchable = signals.where((sig) => isSignalWatchable(sig));
+  return watchable.map((sig) => sig.watch().first);
 }
 
 bool listsEqual(List a, List b) {
