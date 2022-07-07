@@ -23,15 +23,17 @@ bool isSignalWatchable(ProcessSignal sig) {
   return true;
 }
 
-bool isDebugMode() {
-  return Platform.executableArguments.contains('--enable-asserts');
-}
+bool get isDebugMode =>
+    Platform.executableArguments.contains('--enable-asserts');
 
 /// Runs this program in a detached child process.
 ///
 /// Graceful exiting is **disabled in debug mode**, as breakpoints are not
 /// properly triggered.
 /// Pass `enableGracefulExit: true` to enable it anyway.
+///
+/// Log files are also **disabled in debug mode** by default and can be enabled
+/// with `enableLogFiles: true`.
 ///
 /// It's recommended to return `bootstrap()` directly from your `main` function.
 ///
@@ -53,7 +55,7 @@ bool isDebugMode() {
 void bootstrap(
   BodyFunc body, {
   List<String> args = const [],
-  bool enableLogFiles = true,
+  bool? enableLogFiles,
   String outLog = 'logs/out.log',
   String errLog = 'logs/err.log',
   Logger loggerStd = logPassthrough,
@@ -67,7 +69,8 @@ void bootstrap(
     args: args,
   );
 
-  enableGracefulExit ??= !isDebugMode();
+  enableLogFiles ??= !isDebugMode;
+  enableGracefulExit ??= !isDebugMode;
 
   if (!enableGracefulExit || Platform.environment.containsKey(argUnlock)) {
     bootstrapper.runAsWorker(
@@ -108,18 +111,20 @@ class Bootstrapper {
     required bool enableGracefulExit,
     required ExitFunc? onExit,
   }) {
-    // Override stdout and stderr with custom
-    // file writer implementations
-    IOOverrides.global = FileIOOverrides(
-      File(outLog),
-      File(errLog),
-      stdLogger: loggerStd,
-      fileLogger: loggerFile,
-    );
+    if (enableLogFiles) {
+      // Override stdout and stderr with custom
+      // file writer implementations
+      IOOverrides.global = FileIOOverrides(
+        File(outLog),
+        File(errLog),
+        stdLogger: loggerStd,
+        fileLogger: loggerFile,
+      );
 
-    // For some reason, the child quits abruptly
-    // if [stdout.done] is not listened to
-    stdout.done.then((_) {});
+      // For some reason, the child quits abruptly
+      // if [stdout.done] is not listened to
+      stdout.done.then((_) {});
+    }
 
     void workerProgram() {
       void customExit() async {

@@ -1,13 +1,14 @@
 import 'package:graceful/graceful.dart';
 
-const exampleLogs = 'example/logs';
+// You can use a single file for both `out` and `err` messages.
+const exampleLogFile = 'example/logs/out.log';
 
 void main(List<String> args) {
   return bootstrap(
     run,
     args: args,
-    outLog: '$exampleLogs/out.log',
-    errLog: '$exampleLogs/err.log',
+    outLog: exampleLogFile,
+    errLog: exampleLogFile,
     onExit: onExit,
   );
 }
