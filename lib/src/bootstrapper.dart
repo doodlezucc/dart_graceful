@@ -87,9 +87,12 @@ void bootstrap(
 class Bootstrapper {
   static bool _isRunning = true;
   static bool get isRunning => _isRunning;
+  static bool _isExiting = false;
 
   final BodyFunc body;
   final List<String> args;
+
+  static final _exitController = StreamController(sync: true);
 
   Bootstrapper({
     required this.body,
@@ -120,32 +123,47 @@ class Bootstrapper {
 
     void workerProgram() {
       void customExit() async {
+        if (_isExiting) return;
+
+        _isExiting = true;
         _isRunning = false;
         var exitCode = await onExit!();
         exit(exitCode);
       }
 
+      Bootstrapper._exitController.stream.first.then((_) => customExit());
+
       if (enableGracefulExit && onExit != null) {
-        _watchForParentExit(customExit, outLog);
+        _watchForParentExit(customExit);
       }
 
       body(args);
     }
 
     void onError(e, s) {
-      stdout.writeln('Error haha');
       stderr.writeln(e);
       stderr.writeln(s);
+      Bootstrapper.exitGracefully();
+    }
+
+    var printToStdout = ZoneSpecification(
+      print: (_, __, ___, line) => stdout.writeln(line),
+    );
+
+    if (!enableGracefulExit) {
+      return runZoned(workerProgram, zoneSpecification: printToStdout);
     }
 
     // Run program with custom print function
     return runZonedGuarded(
       workerProgram,
       onError,
-      zoneSpecification: ZoneSpecification(
-        print: (_, __, ___, line) => stdout.writeln(line),
-      ),
+      zoneSpecification: printToStdout,
     );
+  }
+
+  static void exitGracefully() {
+    _exitController.add(null);
   }
 
   void runAsWrapper({required Iterable<ProcessSignal> signals}) async {
@@ -193,7 +211,7 @@ bool _listsEqual(List a, List b) {
   return true;
 }
 
-void _watchForParentExit(void Function() cleanup, String out) async {
+void _watchForParentExit(void Function() cleanup) async {
   var parent = int.parse(Platform.environment[argUnlock]!);
   print('parent pid: $parent');
 
@@ -207,12 +225,13 @@ void _watchForParentExit(void Function() cleanup, String out) async {
     var isAlive = await _isProcessRunning(parent);
 
     if (!isAlive) {
-      cleanup();
       break;
     }
 
     await Future.delayed(Duration(seconds: 3));
   }
+
+  cleanup();
 }
 
 void _sendExitToChild(Process process) {
