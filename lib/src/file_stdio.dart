@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart';
+
 typedef Logger = String Function(String line);
 
 String logPassthrough(String line) => line;
@@ -291,16 +293,21 @@ class FileIOOverrides extends IOOverrides {
     Logger stdLogger = logPassthrough,
     Logger fileLogger = logTimestamp,
   }) {
+    var singleFile = canonicalize(outFile.path) == canonicalize(errFile.path);
+
     outFile.createSync(recursive: true);
     errFile.createSync(recursive: true);
+
+    var outSink = outFile.openWrite();
+
     _stdout = FileStdout(
-      outFile.openWrite(),
+      outSink,
       super.stdout,
       fileLogger: fileLogger,
       stdLogger: stdLogger,
     );
     _stderr = FileStdout(
-      errFile.openWrite(),
+      singleFile ? outSink : errFile.openWrite(),
       super.stderr,
       fileLogger: fileLogger,
       stdLogger: stdLogger,
