@@ -29,7 +29,7 @@ void run(List<String> args) async {
 Future<int> onExit() async {
   print('Cleaning up...');
   await Future.delayed(Duration(seconds: 1));
-  print('Exiting');
+  print('Program exit');
 
   return 0;
 }

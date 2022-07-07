@@ -187,8 +187,6 @@ class Bootstrapper {
       environment: {...Platform.environment, argUnlock: '$pid'},
     );
 
-    print('child pid: ${process.pid}');
-
     var childExit = Completer();
 
     process.stdout.listen(stdout.add, onDone: () => childExit.complete());
@@ -201,8 +199,6 @@ class Bootstrapper {
       childExit.future,
       ...watchable.map((sig) => sig.watch().first),
     ]);
-
-    print('Parent exits...');
 
     _sendExitToChild(process);
     await childExit.future;
@@ -223,7 +219,6 @@ bool listsEqual(List a, List b) {
 
 void _watchForParentExit(void Function() cleanup) async {
   var parent = int.parse(Platform.environment[argUnlock]!);
-  print('parent pid: $parent');
 
   stdin.listen((data) {
     if (listsEqual(data, _exitCommandBytes)) cleanup();
