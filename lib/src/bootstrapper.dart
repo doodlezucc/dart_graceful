@@ -17,8 +17,13 @@ const allSignals = [
 ];
 
 bool isSignalWatchable(ProcessSignal sig) {
-  if (Platform.isWindows) {
-    return sig == ProcessSignal.sigint || sig == ProcessSignal.sighup;
+  if (sig != ProcessSignal.sigint && sig != ProcessSignal.sighup) {
+    if (Platform.isWindows) return false;
+
+    return sig == ProcessSignal.sigterm ||
+        sig == ProcessSignal.sigusr1 ||
+        sig == ProcessSignal.sigusr2 ||
+        sig == ProcessSignal.sigwinch;
   }
   return true;
 }
@@ -206,7 +211,7 @@ class Bootstrapper {
   }
 }
 
-bool _listsEqual(List a, List b) {
+bool listsEqual(List a, List b) {
   if (a.length != b.length) return false;
 
   for (var i = 0; i < a.length; i++) {
@@ -221,13 +226,13 @@ void _watchForParentExit(void Function() cleanup) async {
   print('parent pid: $parent');
 
   stdin.listen((data) {
-    if (_listsEqual(data, _exitCommandBytes)) cleanup();
+    if (listsEqual(data, _exitCommandBytes)) cleanup();
   });
 
   await Future.delayed(Duration(seconds: 3));
 
   while (Bootstrapper.isRunning) {
-    var isAlive = await _isProcessRunning(parent);
+    var isAlive = await isProcessRunning(parent);
 
     if (!isAlive) {
       break;
@@ -243,7 +248,7 @@ void _sendExitToChild(Process process) {
   process.stdin.add(_exitCommandBytes);
 }
 
-Future<bool> _isProcessRunning(int pid) async {
+Future<bool> isProcessRunning(int pid) async {
   if (Platform.isWindows) {
     var result = await Process.run(
       'powershell',
