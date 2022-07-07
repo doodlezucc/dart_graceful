@@ -1,15 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:path/path.dart';
-
-import 'future_queue.dart';
+import 'file_stdio.dart';
 
 const argUnlock = 'unlock-boot';
-bool isRunning = true;
+const exitCommand = 'EXIT_GRACEFUL';
+final _exitCommandBytes = exitCommand.codeUnits + [10];
 
-typedef Print = void Function(Object obj);
-typedef CleanExit = FutureOr<int> Function(Print print);
+typedef BodyFunc = FutureOr Function(List<String> args);
+typedef ExitFunc = FutureOr<int> Function();
 
 const allSignals = [
   ProcessSignal.sigint,
@@ -24,85 +23,224 @@ bool isSignalWatchable(ProcessSignal sig) {
   return true;
 }
 
-Future<void> bootstrap(
-  List<String> args,
-  CleanExit cleanExit, {
-  String out = 'logs/out.log',
-  String err = 'logs/err.log',
+bool get isDebugMode =>
+    Platform.executableArguments.contains('--enable-asserts');
+
+/// Runs this program in a detached child process.
+///
+/// Graceful exiting is **disabled in debug mode**, as breakpoints are not
+/// properly triggered.
+/// Pass `enableGracefulExit: true` to enable it anyway.
+///
+/// Log files are also **disabled in debug mode** by default and can be enabled
+/// with `enableLogFiles: true`.
+///
+/// It's recommended to return `bootstrap()` directly from your `main` function.
+///
+/// ```
+/// // Dart entry
+/// void main(List<String> args) {
+///   return bootstrap(run, args, onExit: onExit);
+/// }
+///
+/// void run(List<String> args) {
+///   // Your program...
+/// }
+///
+/// Future<int> onExit() async {
+///   // Perform cleanup...
+///   return 0;
+/// }
+/// ```
+void bootstrap(
+  BodyFunc body, {
+  List<String> args = const [],
+  bool? enableLogFiles,
+  String outLog = 'logs/out.log',
+  String errLog = 'logs/err.log',
+  Logger loggerStd = logPassthrough,
+  Logger loggerFile = logTimestamp,
+  bool? enableGracefulExit,
+  ExitFunc? onExit,
   Iterable<ProcessSignal> signals = allSignals,
 }) async {
-  if (Platform.environment.containsKey(argUnlock)) {
-    _watchForParentExit(cleanExit, out);
-    return;
-  }
-
-  Future<RandomAccessFile> open(String path) async {
-    var dir = dirname(path);
-    await Directory(dir).create(recursive: true);
-    return await File(path).open(mode: FileMode.writeOnly);
-  }
-
-  var script = Platform.script.toFilePath();
-  var isCompiled = !script.endsWith('.dart');
-
-  var process = await Process.start(
-    Platform.executable,
-    isCompiled ? args : [script, ...args],
-    mode: ProcessStartMode.detachedWithStdio,
-    environment: {...Platform.environment, argUnlock: '$pid'},
+  var bootstrapper = Bootstrapper(
+    body: body,
+    args: args,
   );
 
-  print('child process pid: ${process.pid}');
+  enableLogFiles ??= !isDebugMode;
+  enableGracefulExit ??= !isDebugMode;
 
-  var completer = Completer();
+  if (!enableGracefulExit || Platform.environment.containsKey(argUnlock)) {
+    bootstrapper.runAsWorker(
+      enableLogFiles: enableLogFiles,
+      outLog: outLog,
+      errLog: errLog,
+      loggerStd: loggerStd,
+      loggerFile: loggerFile,
+      enableGracefulExit: enableGracefulExit,
+      onExit: onExit,
+    );
+  } else {
+    bootstrapper.runAsWrapper(signals: signals);
+  }
+}
 
-  var outFile = await open(out);
-  var errFile = await open(err);
-  var outSeq = FutureQueue();
-  var errSeq = FutureQueue();
+class Bootstrapper {
+  static bool _isRunning = true;
+  static bool get isRunning => _isRunning;
+  static bool _isExiting = false;
 
-  process.stdout.listen((data) {
-    stdout.add(data);
-    outSeq.add(() => outFile.writeFrom(data));
-  }, onDone: () => completer.complete());
+  final BodyFunc body;
+  final List<String> args;
 
-  process.stderr.listen((data) {
-    stderr.add(data);
-    errSeq.add(() => errFile.writeFrom(data));
+  static final _exitController = StreamController(sync: true);
+
+  Bootstrapper({
+    required this.body,
+    required this.args,
   });
 
-  var watchable = signals.where((sig) => isSignalWatchable(sig));
+  void runAsWorker({
+    required bool enableLogFiles,
+    required String outLog,
+    required String errLog,
+    required Logger loggerStd,
+    required Logger loggerFile,
+    required bool enableGracefulExit,
+    required ExitFunc? onExit,
+  }) {
+    if (enableLogFiles) {
+      // Override stdout and stderr with custom
+      // file writer implementations
+      IOOverrides.global = FileIOOverrides(
+        File(outLog),
+        File(errLog),
+        stdLogger: loggerStd,
+        fileLogger: loggerFile,
+      );
 
-  await Future.any([
-    completer.future,
-    ...watchable.map((sig) => sig.watch().first),
-  ]);
+      // For some reason, the child quits abruptly
+      // if [stdout.done] is not listened to
+      stdout.done.then((_) {});
+    }
 
-  outSeq.add(() => outFile.close());
-  errSeq.add(() => errFile.close());
-  await Future.wait([outSeq.whenDrained, errSeq.whenDrained]);
+    void workerProgram() {
+      void customExit() async {
+        if (_isExiting) return;
 
-  exit(0);
+        _isExiting = true;
+        _isRunning = false;
+        var exitCode = await onExit!();
+        exit(exitCode);
+      }
+
+      Bootstrapper._exitController.stream.first.then((_) => customExit());
+
+      if (enableGracefulExit && onExit != null) {
+        _watchForParentExit(customExit);
+      }
+
+      body(args);
+    }
+
+    void onError(e, s) {
+      stderr.writeln(e);
+      stderr.writeln(s);
+      Bootstrapper.exitGracefully();
+    }
+
+    var printToStdout = ZoneSpecification(
+      print: (_, __, ___, line) => stdout.writeln(line),
+    );
+
+    if (!enableGracefulExit) {
+      return runZoned(workerProgram, zoneSpecification: printToStdout);
+    }
+
+    // Run program with custom print function
+    return runZonedGuarded(
+      workerProgram,
+      onError,
+      zoneSpecification: printToStdout,
+    );
+  }
+
+  static void exitGracefully() {
+    _exitController.add(null);
+  }
+
+  void runAsWrapper({required Iterable<ProcessSignal> signals}) async {
+    var script = Platform.script.toFilePath();
+    var isCompiled = !script.endsWith('.dart');
+
+    var process = await Process.start(
+      Platform.executable,
+      isCompiled ? args : [script, ...args],
+      mode: ProcessStartMode.detachedWithStdio,
+      environment: {...Platform.environment, argUnlock: '$pid'},
+    );
+
+    print('child pid: ${process.pid}');
+
+    var childExit = Completer();
+
+    process.stdout.listen(stdout.add, onDone: () => childExit.complete());
+    process.stderr.listen(stderr.add);
+    stdin.listen(process.stdin.add);
+
+    var watchable = signals.where((sig) => isSignalWatchable(sig));
+
+    await Future.any([
+      childExit.future,
+      ...watchable.map((sig) => sig.watch().first),
+    ]);
+
+    print('Parent exits...');
+
+    _sendExitToChild(process);
+    await childExit.future;
+
+    exit(0);
+  }
 }
 
-void _specialPrint(Object obj, String out) {
-  print(obj);
-  File(out).writeAsStringSync('$obj\n', mode: FileMode.append);
+bool _listsEqual(List a, List b) {
+  if (a.length != b.length) return false;
+
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+
+  return true;
 }
 
-void _watchForParentExit(CleanExit cleanup, String out) async {
+void _watchForParentExit(void Function() cleanup) async {
   var parent = int.parse(Platform.environment[argUnlock]!);
   print('parent pid: $parent');
-  while (isRunning) {
-    await Future.delayed(Duration(seconds: 3));
 
+  stdin.listen((data) {
+    if (_listsEqual(data, _exitCommandBytes)) cleanup();
+  });
+
+  await Future.delayed(Duration(seconds: 3));
+
+  while (Bootstrapper.isRunning) {
     var isAlive = await _isProcessRunning(parent);
 
     if (!isAlive) {
-      var exitCode = await cleanup((obj) => _specialPrint(obj, out));
-      exit(exitCode);
+      break;
     }
+
+    await Future.delayed(Duration(seconds: 3));
   }
+
+  cleanup();
+}
+
+void _sendExitToChild(Process process) {
+  process.stdin.add(_exitCommandBytes);
 }
 
 Future<bool> _isProcessRunning(int pid) async {
@@ -113,7 +251,15 @@ Future<bool> _isProcessRunning(int pid) async {
       runInShell: true,
     );
     return result.exitCode == 0;
+  } else if (Platform.isLinux) {
+    var result = await Process.run(
+      'ps',
+      ['$pid'],
+      runInShell: true,
+    );
+    return result.exitCode == 0;
   }
+
   throw UnsupportedError(
-      'Bootstrapper not yet supported for ${Platform.operatingSystem}');
+      'Not able to find parent process on ${Platform.operatingSystem}');
 }

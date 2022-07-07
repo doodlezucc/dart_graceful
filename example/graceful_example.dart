@@ -1,14 +1,19 @@
 import 'package:graceful/graceful.dart';
 
-void main(List<String> args) async {
-  var dir = 'example/logs';
-  await bootstrap(
-    args,
-    cleanExit,
-    out: '$dir/out.log',
-    err: '$dir/err.log',
-  );
+// You can use a single file for both `out` and `err` messages.
+const exampleLogFile = 'example/logs/out.log';
 
+void main(List<String> args) {
+  return bootstrap(
+    run,
+    args: args,
+    outLog: exampleLogFile,
+    errLog: exampleLogFile,
+    onExit: onExit,
+  );
+}
+
+void run(List<String> args) async {
   print('Program start');
   print('Waiting for 5 seconds...');
   await Future.delayed(Duration(seconds: 5));
@@ -21,7 +26,7 @@ void main(List<String> args) async {
   }
 }
 
-Future<int> cleanExit(Print print) async {
+Future<int> onExit() async {
   print('Cleaning up...');
   await Future.delayed(Duration(seconds: 1));
   print('Exiting');
