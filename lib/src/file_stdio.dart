@@ -101,6 +101,10 @@ class FileStdout implements Stdout {
 
   String _modifyLines(Object? object, Logger logger) =>
       '$object'.split('\n').map((line) => logger(line)).join('\n');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      _throwNoSuchMethod(this, invocation);
 }
 
 class BroadcastStdin implements Stdin {
@@ -278,6 +282,21 @@ class BroadcastStdin implements Stdin {
   @override
   Stream<List<int>> where(bool Function(List<int> event) test) =>
       broadcast.where(test);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      _throwNoSuchMethod(this, invocation);
+}
+
+void _throwNoSuchMethod(Object object, Invocation invocation) {
+  final member = _symbolToString(invocation.memberName);
+  throw UnimplementedError(
+      '"${object.runtimeType}.$member" is not supported by graceful.');
+}
+
+String _symbolToString(Symbol symbol) {
+  final s = symbol.toString();
+  return s.substring(8, s.length - 2);
 }
 
 class FileIOOverrides extends IOOverrides {
