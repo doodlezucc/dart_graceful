@@ -1,7 +1,8 @@
 ## 1.2.0
 
-- Constrained SDK minimum to `2.16.0` (introduction of Stdio overrides).
 - Fixed compile time error due to new `Stdin.echoNewlineMode` property in `dart:io`.
+- Constrained SDK minimum to `2.16.0` (introduction of Stdio overrides).
+- Bootstrapped programs now immediately exit after running the passed `body`. This behavior can be changed by passing `exitAfterBody: false`.
 
 ## 1.1.0
 

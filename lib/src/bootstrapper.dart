@@ -66,6 +66,7 @@ void bootstrap(
   List<String> args = const [],
   ExitFunc? onExit,
   Iterable<ProcessSignal> signals = allSignals,
+  bool exitAfterBody = true,
   bool? enableChildProcess = ifNotDebugging,
   bool? enableLogFiles = ifNotDebugging,
   String fileOut = 'logs/out.log',
@@ -89,6 +90,7 @@ void bootstrap(
       errLog: fileErr,
       loggerStd: formatterStd,
       loggerFile: formatterFile,
+      exitAfterBody: exitAfterBody,
       isChildProcess: enableChildProcess,
       onExit: onExit,
     );
@@ -120,9 +122,10 @@ class Bootstrapper {
     required String errLog,
     required Logger loggerStd,
     required Logger loggerFile,
+    required bool exitAfterBody,
     required bool isChildProcess,
     required ExitFunc? onExit,
-  }) {
+  }) async {
     if (enableLogFiles) {
       // Override stdout and stderr with custom
       // file writer implementations
@@ -138,8 +141,8 @@ class Bootstrapper {
       stdout.done.then((_) {});
     }
 
-    void workerProgram() {
-      void customExit() async {
+    Future<void> workerProgram() async {
+      Future<void> customExit() async {
         if (_isExiting) return;
 
         _isExiting = true;
@@ -150,14 +153,17 @@ class Bootstrapper {
 
       Future.any([
         Bootstrapper._exitController.stream.first,
-        ..._awaitSignals(signals)
+        ..._awaitSignals(signals),
       ]).then((_) => customExit());
 
       if (isChildProcess && onExit != null) {
         _watchForParentExit(customExit);
       }
 
-      body(args);
+      await body(args);
+      if (exitAfterBody) {
+        exit(0);
+      }
     }
 
     void onError(e, s) {
@@ -182,6 +188,11 @@ class Bootstrapper {
     );
   }
 
+  /// Calls the `onExit()` handler that was passed in `bootstrap()` and exits
+  /// the Dart VM process immediately after.
+  ///
+  /// If the current program has already been asked to exit, calling this method
+  /// has no effect.
   static void exitGracefully() {
     _exitController.add(null);
   }
@@ -205,11 +216,22 @@ class Bootstrapper {
 
     await Future.any([childExit.future, ..._awaitSignals(signals)]);
 
-    _sendExitToChild(process);
-    await childExit.future;
+    if (!childExit.isCompleted) {
+      _sendExitToChild(process);
+      await childExit.future;
+    }
 
     exit(0);
   }
+}
+
+/// Calls the `onExit()` handler that was passed in `bootstrap()` and exits
+/// the Dart VM process immediately after.
+///
+/// If the current program has already been asked to exit, calling this method
+/// has no effect.
+void exitGracefully() {
+  Bootstrapper.exitGracefully();
 }
 
 Iterable<Future> _awaitSignals(Iterable<ProcessSignal> signals) {

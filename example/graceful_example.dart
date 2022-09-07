@@ -10,6 +10,10 @@ void main(List<String> args) {
     onExit: onExit,
     fileOut: exampleLogFile,
     fileErr: exampleLogFile,
+
+    // Set this to false if your `run` method starts an indefinite process,
+    // for example a server socket listening to incoming events.
+    exitAfterBody: true,
   );
 }
 

@@ -22,7 +22,13 @@
 library graceful;
 
 export 'src/bootstrapper.dart'
-    show allSignals, bootstrap, isDebugMode, Bootstrapper, isProcessRunning;
+    show
+        allSignals,
+        bootstrap,
+        isDebugMode,
+        Bootstrapper,
+        isProcessRunning,
+        exitGracefully;
 export 'src/file_stdio.dart'
     show
         BroadcastStdin,
